@@ -248,6 +248,16 @@
     <h3>Registrar pago</h3>
     <input type="hidden" id="pagoAlumnaId">
     <div class="field"><label>Monto (Bs)</label><input id="pagoMonto" type="number" placeholder="Ej: 250"></div>
+    <div class="field"><label>Meses que cubre este pago</label>
+      <select id="pagoMeses" onchange="actualizarMontoSugerido()">
+        <option value="1">1 mes</option>
+        <option value="2">2 meses</option>
+        <option value="3">3 meses</option>
+        <option value="6">6 meses</option>
+        <option value="12">12 meses</option>
+      </select>
+    </div>
+    <div class="field"><label>Fecha del pago</label><input id="pagoFecha" type="date"></div>
     <div class="field"><label>Método de pago</label>
       <select id="pagoMetodo">
         <option value="efectivo">Efectivo</option>
@@ -256,7 +266,7 @@
       </select>
     </div>
     <div class="modal-actions">
-      <button class="primary" onclick="confirmarPago()">Confirmar y renovar (+1 mes)</button>
+      <button class="primary" onclick="confirmarPago()">Confirmar y renovar</button>
     </div>
   </div>
 </div>
@@ -415,7 +425,7 @@ function abrirCarnet(id){
   const historial = DB.pagos.filter(p=>p.alumnaId===a.id).sort((x,y)=>y.fecha.localeCompare(x.fecha));
   const histEl = document.getElementById('carnetHistorial');
   histEl.innerHTML = historial.length
-    ? historial.slice(0,6).map(p=>`<div class="pago-row"><span>${fmtFecha(p.fecha)} · ${metodoLabel(p.metodo)}</span><strong>Bs ${p.monto||'—'}</strong></div>`).join('')
+    ? historial.slice(0,6).map(p=>`<div class="pago-row"><span>${fmtFecha(p.fecha)} · ${metodoLabel(p.metodo)}${p.meses>1?` · ${p.meses} meses`:''}</span><strong>Bs ${p.monto||'—'}</strong></div>`).join('')
     : '<div class="empty">Sin pagos registrados todavía.</div>';
 
   const btnToggle = document.getElementById('btnToggleActiva');
@@ -426,17 +436,26 @@ function abrirCarnet(id){
 function abrirPagoModal(){
   const a = DB.alumnas.find(x=>x.id===carnetAlumnaId); if(!a) return;
   document.getElementById('pagoAlumnaId').value = a.id;
+  document.getElementById('pagoMeses').value = '1';
   document.getElementById('pagoMonto').value = a.precio || '';
+  document.getElementById('pagoFecha').value = todayStr();
   document.getElementById('pagoMetodo').value = 'efectivo';
   document.getElementById('modalPago').classList.add('active');
+}
+function actualizarMontoSugerido(){
+  const a = DB.alumnas.find(x=>x.id===document.getElementById('pagoAlumnaId').value); if(!a || !a.precio) return;
+  const meses = +document.getElementById('pagoMeses').value;
+  document.getElementById('pagoMonto').value = Number(a.precio) * meses;
 }
 function confirmarPago(){
   const id = document.getElementById('pagoAlumnaId').value;
   const a = DB.alumnas.find(x=>x.id===id); if(!a) return;
   const monto = document.getElementById('pagoMonto').value;
+  const meses = +document.getElementById('pagoMeses').value || 1;
+  const fecha = document.getElementById('pagoFecha').value || todayStr();
   const metodo = document.getElementById('pagoMetodo').value;
-  DB.pagos.push({ id:'pg_'+Date.now(), alumnaId:a.id, fecha:todayStr(), monto, metodo });
-  a.vence = addDays(a.vence < todayStr() ? todayStr() : a.vence, 30);
+  DB.pagos.push({ id:'pg_'+Date.now(), alumnaId:a.id, fecha, monto, metodo, meses });
+  a.vence = addDays(a.vence < todayStr() ? todayStr() : a.vence, 30*meses);
   save();
   closeModal('modalPago');
   abrirCarnet(a.id); render();
