@@ -79,7 +79,8 @@
   .modal h3{margin-bottom:14px;}
   .field{margin-bottom:12px;}
   .field label{display:block;font-size:12.5px;color:var(--muted);margin-bottom:4px;}
-  .field input,.field select{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:9px;font-size:14.5px;font-family:'Inter';background:#fff;}
+  .field input,.field select,.field textarea{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:9px;font-size:14.5px;font-family:'Inter';background:#fff;}
+  .field textarea{resize:vertical;min-height:64px;}
   .modal-actions{display:flex;gap:8px;margin-top:16px;}
   .modal-actions button{flex:1;}
   .close-x{position:absolute;top:16px;right:18px;background:none;border:none;font-size:20px;color:var(--muted);cursor:pointer;}
@@ -139,6 +140,11 @@
       <div class="section-title">Escanear carnet</div>
       <div id="reader"></div>
       <div id="scanResult"></div>
+      <div class="section-title">O elegir manualmente</div>
+      <div class="field" style="margin-bottom:10px;">
+        <select id="manualAlumnaSelect"><option value="">Elegir alumna…</option></select>
+      </div>
+      <button class="primary" style="margin-bottom:20px;" onclick="registrarManual()">Registrar asistencia</button>
       <div class="section-title">Registrado hoy</div>
       <div class="row-list" id="asistenciaHoyList"></div>
     </section>
@@ -185,8 +191,10 @@
         <option value="ilimitado">Ilimitado / mes</option>
       </select>
     </div>
+    <div class="field"><label>Fecha de nacimiento</label><input id="alumnaNacimiento" type="date"></div>
     <div class="field"><label>Precio (Bs)</label><input id="alumnaPrecio" type="number" placeholder="Ej: 250"></div>
     <div class="field"><label>Vence el</label><input id="alumnaVence" type="date"></div>
+    <div class="field"><label>Observaciones</label><textarea id="alumnaObs" placeholder="Ej: alergias, lesiones, contacto de emergencia, preferencias..."></textarea></div>
     <div class="modal-actions">
       <button class="ghost" id="btnEliminarAlumna" style="display:none" onclick="eliminarAlumna()">Eliminar</button>
       <button class="primary" onclick="guardarAlumna()">Guardar</button>
@@ -205,6 +213,10 @@
       <div class="venc" id="carnetVence">—</div>
     </div>
     <button class="wa" style="width:100%;padding:12px;font-size:14px" id="btnWa" onclick="enviarRecordatorio()">Enviar recordatorio por WhatsApp</button>
+    <div id="carnetExtra" style="margin:14px 0;font-size:13.5px;color:var(--muted);display:none;">
+      <div id="carnetNacimiento" style="margin-bottom:6px;"></div>
+      <div id="carnetObs"></div>
+    </div>
     <div class="modal-actions">
       <button class="ghost" onclick="renovarDesdeCarnet()">Renovar membresía (+1 mes)</button>
       <button class="ghost" onclick="editarDesdeCarnet()">Editar datos</button>
@@ -308,8 +320,10 @@ function openAlumnaModal(alumna){
   document.getElementById('alumnaNombre').value = alumna ? alumna.nombre : '';
   document.getElementById('alumnaTelefono').value = alumna ? alumna.telefono : '';
   document.getElementById('alumnaPlan').value = alumna ? alumna.plan : '4';
+  document.getElementById('alumnaNacimiento').value = alumna ? (alumna.nacimiento||'') : '';
   document.getElementById('alumnaPrecio').value = alumna ? alumna.precio : '';
   document.getElementById('alumnaVence').value = alumna ? alumna.vence : addDays(todayStr(),30);
+  document.getElementById('alumnaObs').value = alumna ? (alumna.observaciones||'') : '';
   document.getElementById('btnEliminarAlumna').style.display = alumna ? 'block':'none';
   document.getElementById('modalAlumna').classList.add('active');
 }
@@ -323,8 +337,10 @@ function guardarAlumna(){
     id, nombre,
     telefono: document.getElementById('alumnaTelefono').value.trim(),
     plan: document.getElementById('alumnaPlan').value,
+    nacimiento: document.getElementById('alumnaNacimiento').value,
     precio: document.getElementById('alumnaPrecio').value,
-    vence: document.getElementById('alumnaVence').value || addDays(todayStr(),30)
+    vence: document.getElementById('alumnaVence').value || addDays(todayStr(),30),
+    observaciones: document.getElementById('alumnaObs').value.trim()
   };
   const idx = DB.alumnas.findIndex(a=>a.id===id);
   if(idx>=0) DB.alumnas[idx]=data; else DB.alumnas.push(data);
@@ -343,8 +359,13 @@ function abrirCarnet(id){
   document.getElementById('carnetNombre').textContent=a.nombre;
   document.getElementById('carnetPlan').textContent = a.plan==='ilimitado' ? 'Plan ilimitado' : `Plan ${a.plan} clases/mes`;
   document.getElementById('carnetVence').textContent = `Vence: ${fmtFecha(a.vence)} · ${estadoLabel(a.vence)}`;
+  const nacEl = document.getElementById('carnetNacimiento');
+  const obsEl = document.getElementById('carnetObs');
+  nacEl.textContent = a.nacimiento ? `🎂 Nace: ${fmtFecha(a.nacimiento)}` : '';
+  obsEl.textContent = a.observaciones ? `📝 ${a.observaciones}` : '';
+  document.getElementById('carnetExtra').style.display = (a.nacimiento || a.observaciones) ? 'block' : 'none';
   document.getElementById('qrbox').innerHTML='';
-  new QRCode(document.getElementById('qrbox'), {text:a.id, width:150, height:150, colorDark:'#241220', colorLight:'#ffffff'});
+  new QRCode(document.getElementById('qrbox'), {text:a.id, width:220, height:220, colorDark:'#241220', colorLight:'#ffffff', correctLevel:QRCode.CorrectLevel.H});
   document.getElementById('modalCarnet').classList.add('active');
 }
 function renovarDesdeCarnet(){
@@ -457,7 +478,16 @@ function stopScanner(){
   if(html5Scanner){ html5Scanner.stop().catch(()=>{}); html5Scanner.clear().catch(()=>{}); html5Scanner=null; }
 }
 function onScanSuccess(decodedText){
-  const a = DB.alumnas.find(x=>x.id===decodedText);
+  marcarAsistencia(decodedText);
+}
+function registrarManual(){
+  const id = document.getElementById('manualAlumnaSelect').value;
+  if(!id){ alert('Elige una alumna de la lista'); return; }
+  marcarAsistencia(id);
+  document.getElementById('manualAlumnaSelect').value='';
+}
+function marcarAsistencia(alumnaId){
+  const a = DB.alumnas.find(x=>x.id===alumnaId);
   const box = document.getElementById('scanResult');
   if(!a){ box.innerHTML = `<div class="scan-result">Carnet no reconocido.</div>`; return; }
   const hoy=todayStr();
@@ -519,6 +549,13 @@ function render(){
     const a = DB.alumnas.find(x=>x.id===r.alumnaId);
     return `<div class="row-item"><div class="who"><div class="nm">${a?a.nombre:'—'}</div><div class="sub">${r.hora}</div></div></div>`;
   }).join('') : '<div class="empty">Aún no se registró asistencia hoy.</div>';
+
+  // desplegable manual de asistencia
+  const sel = document.getElementById('manualAlumnaSelect');
+  const prevVal = sel.value;
+  sel.innerHTML = '<option value="">Elegir alumna…</option>' +
+    [...DB.alumnas].sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('');
+  sel.value = prevVal;
 }
 </script>
 </body>
