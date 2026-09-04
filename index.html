@@ -18,6 +18,7 @@
 <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-database-compat.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   :root{
     --bg:#FBF6F2;
@@ -109,10 +110,39 @@
   .day-chips button{flex:none;padding:8px 14px;border-radius:20px;border:1px solid var(--line);background:#fff;font-size:13px;color:var(--muted);cursor:pointer;}
   .day-chips button.active{background:var(--ink);color:#fff;border-color:var(--ink);}
   .class-time{font-family:'Fraunces';font-size:17px;min-width:56px;}
+
+  /* Pantalla de acceso */
+  #gate{max-width:480px;margin:0 auto;min-height:100vh;padding:26px 22px;display:flex;flex-direction:column;}
+  #gate .gate-logo{height:38px;margin-bottom:18px;}
+  #gate h2{font-size:17px;margin-bottom:4px;}
+  #gate .gate-sub{color:var(--muted);font-size:13px;margin-bottom:18px;}
+  .gate-day{margin-bottom:16px;}
+  .gate-day .gate-day-title{font-size:13px;font-weight:600;color:var(--accent);margin-bottom:6px;}
+  .gate-admin-box{margin-top:auto;padding-top:22px;border-top:1px solid var(--line);}
+  .gate-admin-box .field{margin-bottom:10px;}
+  #gateError{color:var(--red);font-size:12.5px;margin-top:6px;display:none;}
+  .settings-row{display:flex;gap:8px;margin-top:26px;}
+  .settings-row button{flex:1;}
 </style>
 </head>
 <body>
-<div id="app">
+
+<div id="gate">
+  <img class="gate-logo" src="" id="gateLogo" alt="">
+  <h2>Horario de clases</h2>
+  <div class="gate-sub">Consulta pública — sin necesidad de ingresar</div>
+  <div id="gateSchedule"></div>
+
+  <div class="gate-admin-box">
+    <h2>Acceso administración</h2>
+    <div class="gate-sub">Solo para la profesora / equipo administrativo</div>
+    <div class="field"><input id="gatePinInput" type="password" inputmode="numeric" placeholder="PIN de acceso"></div>
+    <button class="primary" onclick="intentarEntrarAdmin()">Entrar</button>
+    <div id="gateError">PIN incorrecto. Intenta de nuevo.</div>
+  </div>
+</div>
+
+<div id="app" style="display:none;">
 
   <header class="topbar">
     <div class="brand">
@@ -121,6 +151,10 @@
       <button class="edit-name" onclick="editAcademia()">editar nombre</button>
     </div>
     <div class="subtitle" id="todaySub"></div>
+    <div style="margin-top:8px;font-size:11px;color:var(--muted);">
+      <button class="edit-name" onclick="cambiarPin()">cambiar PIN</button> ·
+      <button class="edit-name" onclick="cerrarSesionAdmin()">cerrar sesión admin</button>
+    </div>
   </header>
 
   <main>
@@ -149,6 +183,10 @@
 
     <!-- ASISTENCIA -->
     <section class="view" id="view-asistencia">
+      <div class="section-title">Clase de hoy</div>
+      <div class="field" style="margin-bottom:14px;">
+        <select id="claseAsistenciaSelect"><option value="">Sin clase específica</option></select>
+      </div>
       <div class="section-title">Escanear carnet</div>
       <div id="reader"></div>
       <div id="scanResult"></div>
@@ -170,8 +208,34 @@
 
     <!-- COBROS -->
     <section class="view" id="view-cobros">
-      <div class="day-chips" id="cobrosFilterChips"></div>
-      <div class="row-list" id="cobrosList"></div>
+      <div class="day-chips" id="cobrosModeChips"></div>
+
+      <div id="cobrosMembresias">
+        <div class="day-chips" id="cobrosFilterChips"></div>
+        <div class="row-list" id="cobrosList"></div>
+      </div>
+
+      <div id="cobrosReportes" style="display:none;">
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+          <div class="field" style="margin-bottom:0;"><label>Desde</label><input id="repDesde" type="date"></div>
+          <div class="field" style="margin-bottom:0;"><label>Hasta</label><input id="repHasta" type="date"></div>
+        </div>
+        <button class="ghost" style="width:100%;margin-bottom:14px;" onclick="renderReportes()">Aplicar período</button>
+
+        <div class="stat-row">
+          <div class="stat"><div class="num" id="repIngresos" style="color:var(--green)">0</div><div class="label">ingresos (Bs)</div></div>
+          <div class="stat"><div class="num" id="repEgresos" style="color:var(--red)">0</div><div class="label">egresos (Bs)</div></div>
+          <div class="stat"><div class="num" id="repNeto">0</div><div class="label">resultado (Bs)</div></div>
+        </div>
+
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+          <button class="ghost" style="flex:1;" onclick="abrirEgresoModal()">+ Agregar egreso</button>
+          <button class="primary" style="flex:1;" onclick="exportarExcel()">Exportar a Excel</button>
+        </div>
+
+        <div class="section-title">Movimientos del período</div>
+        <div class="row-list" id="repMovimientos"></div>
+      </div>
     </section>
 
   </main>
@@ -271,6 +335,20 @@
   </div>
 </div>
 
+<!-- MODAL: egreso -->
+<div class="modal-bg" id="modalEgreso">
+  <div class="modal" style="position:relative;">
+    <button class="close-x" onclick="closeModal('modalEgreso')">✕</button>
+    <h3>Agregar egreso</h3>
+    <div class="field"><label>Concepto</label><input id="egresoConcepto" placeholder="Ej: Alquiler, sonido, limpieza..."></div>
+    <div class="field"><label>Monto (Bs)</label><input id="egresoMonto" type="number" placeholder="Ej: 500"></div>
+    <div class="field"><label>Fecha</label><input id="egresoFecha" type="date"></div>
+    <div class="modal-actions">
+      <button class="primary" onclick="guardarEgreso()">Guardar egreso</button>
+    </div>
+  </div>
+</div>
+
 <!-- MODAL: clase form -->
 <div class="modal-bg" id="modalClase">
   <div class="modal" style="position:relative;">
@@ -308,7 +386,7 @@ firebase.initializeApp(firebaseConfig);
 const dataRef = firebase.database().ref('polefitness_data');
 
 /* ---------- Estado ---------- */
-let DB = { academia: 'Studio Pole & Fitness', alumnas: [], clases: [], asistencias: [], pagos: [] };
+let DB = { academia: 'Studio Pole & Fitness', alumnas: [], clases: [], asistencias: [], pagos: [], egresos: [], config: { adminPin: '1234' } };
 let currentView = 'inicio'; // vista actual: es local a cada dispositivo, no se sincroniza
 let firstLoad = true;
 
@@ -318,11 +396,12 @@ dataRef.on('value', snapshot => {
   const val = snapshot.val();
   if(val){
     DB = val;
-    if(!DB.alumnas) DB.alumnas=[]; if(!DB.clases) DB.clases=[]; if(!DB.asistencias) DB.asistencias=[]; if(!DB.pagos) DB.pagos=[];
+    if(!DB.alumnas) DB.alumnas=[]; if(!DB.clases) DB.clases=[]; if(!DB.asistencias) DB.asistencias=[]; if(!DB.pagos) DB.pagos=[]; if(!DB.egresos) DB.egresos=[]; if(!DB.config) DB.config={adminPin:'1234'};
   } else if(firstLoad){
     save(); // primera vez que se usa: crea el registro inicial en Firebase
   }
   firstLoad = false;
+  renderGateSchedule();
   render();
   if(currentView==='calendario') renderCalendario();
   if(currentView==='cobros') renderCobros();
@@ -551,8 +630,26 @@ function renderAlumnas(){
   }).join('');
 }
 
+let cobrosModo='membresias';
+function renderCobrosModeChips(){
+  const chips=document.getElementById('cobrosModeChips'); chips.innerHTML='';
+  [['membresias','Membresías'],['reportes','Reportes']].forEach(([key,label])=>{
+    const b=document.createElement('button'); b.textContent=label;
+    if(cobrosModo===key) b.classList.add('active');
+    b.onclick=()=>{
+      cobrosModo=key;
+      document.getElementById('cobrosMembresias').style.display = key==='membresias' ? 'block':'none';
+      document.getElementById('cobrosReportes').style.display = key==='reportes' ? 'block':'none';
+      renderCobrosModeChips();
+      if(key==='reportes') renderReportes();
+    };
+    chips.appendChild(b);
+  });
+}
+
 let cobrosFilter='todas';
 function renderCobros(){
+  renderCobrosModeChips();
   const chips=document.getElementById('cobrosFilterChips'); chips.innerHTML='';
   [['todas','Todas'],['late','Vencidas'],['soon','Por vencer'],['ok','Al día']].forEach(([key,label])=>{
     const b=document.createElement('button'); b.textContent=label;
@@ -571,6 +668,91 @@ function renderCobros(){
       <span class="badge ${est}">${estadoLabel(a.vence)}</span>
     </div>`;
   }).join('');
+}
+
+/* ---------- Reportes (ingresos/egresos por período + export) ---------- */
+function metodoLabelGlobal(m){ return {efectivo:'Efectivo', transferencia:'Transferencia', qr:'QR'}[m] || m; }
+
+function renderReportes(){
+  const desdeEl = document.getElementById('repDesde');
+  const hastaEl = document.getElementById('repHasta');
+  if(!desdeEl.value || !hastaEl.value){
+    const hoy = todayStr();
+    desdeEl.value = desdeEl.value || hoy.slice(0,8)+'01';
+    hastaEl.value = hastaEl.value || hoy;
+  }
+  const desde = desdeEl.value, hasta = hastaEl.value;
+
+  const pagosPeriodo = DB.pagos.filter(p=>p.fecha>=desde && p.fecha<=hasta);
+  const egresosPeriodo = DB.egresos.filter(e=>e.fecha>=desde && e.fecha<=hasta);
+
+  const totalIngresos = pagosPeriodo.reduce((s,p)=>s+Number(p.monto||0),0);
+  const totalEgresos = egresosPeriodo.reduce((s,e)=>s+Number(e.monto||0),0);
+
+  document.getElementById('repIngresos').textContent = totalIngresos;
+  document.getElementById('repEgresos').textContent = totalEgresos;
+  document.getElementById('repNeto').textContent = totalIngresos - totalEgresos;
+
+  const movimientos = [
+    ...pagosPeriodo.map(p=>({...p, tipo:'ingreso', label: (DB.alumnas.find(a=>a.id===p.alumnaId)||{}).nombre || 'Alumna', detalle: metodoLabelGlobal(p.metodo)})),
+    ...egresosPeriodo.map(e=>({...e, tipo:'egreso', label: e.concepto, detalle:'Egreso'}))
+  ].sort((a,b)=>b.fecha.localeCompare(a.fecha));
+
+  const cont = document.getElementById('repMovimientos');
+  cont.innerHTML = movimientos.length ? movimientos.map(m=>`
+    <div class="row-item ${m.tipo==='ingreso'?'ok':'late'}">
+      <div class="who"><div class="nm">${m.label}</div><div class="sub">${fmtFecha(m.fecha)} · ${m.detalle}</div></div>
+      <strong style="color:${m.tipo==='ingreso'?'var(--green)':'var(--red)'}">${m.tipo==='ingreso'?'+':'-'}Bs ${m.monto||'—'}</strong>
+    </div>`).join('') : '<div class="empty">No hay movimientos en este período.</div>';
+}
+
+function abrirEgresoModal(){
+  document.getElementById('egresoConcepto').value='';
+  document.getElementById('egresoMonto').value='';
+  document.getElementById('egresoFecha').value=todayStr();
+  document.getElementById('modalEgreso').classList.add('active');
+}
+function guardarEgreso(){
+  const concepto = document.getElementById('egresoConcepto').value.trim();
+  const monto = document.getElementById('egresoMonto').value;
+  const fecha = document.getElementById('egresoFecha').value || todayStr();
+  if(!concepto){ alert('Escribe el concepto del egreso'); return; }
+  DB.egresos.push({ id:'eg_'+Date.now(), concepto, monto, fecha });
+  save();
+  closeModal('modalEgreso');
+  renderReportes();
+}
+
+function exportarExcel(){
+  const desde = document.getElementById('repDesde').value;
+  const hasta = document.getElementById('repHasta').value;
+  const pagosPeriodo = DB.pagos.filter(p=>p.fecha>=desde && p.fecha<=hasta);
+  const egresosPeriodo = DB.egresos.filter(e=>e.fecha>=desde && e.fecha<=hasta);
+
+  const filasIngresos = pagosPeriodo.map(p=>({
+    Fecha: p.fecha,
+    Alumna: (DB.alumnas.find(a=>a.id===p.alumnaId)||{}).nombre || '—',
+    Monto: Number(p.monto||0),
+    Metodo: metodoLabelGlobal(p.metodo),
+    Meses: p.meses||1
+  }));
+  const filasEgresos = egresosPeriodo.map(e=>({
+    Fecha: e.fecha,
+    Concepto: e.concepto,
+    Monto: Number(e.monto||0)
+  }));
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filasIngresos), 'Ingresos');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(filasEgresos), 'Egresos');
+  const totalIng = filasIngresos.reduce((s,r)=>s+r.Monto,0);
+  const totalEgr = filasEgresos.reduce((s,r)=>s+r.Monto,0);
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet([
+    {Concepto:'Total ingresos', Monto: totalIng},
+    {Concepto:'Total egresos', Monto: totalEgr},
+    {Concepto:'Resultado neto', Monto: totalIng-totalEgr}
+  ]), 'Resumen');
+  XLSX.writeFile(wb, `PoleFitness_${desde}_a_${hasta}.xlsx`);
 }
 
 /* ---------- Asistencia / escáner ---------- */
@@ -602,10 +784,17 @@ function marcarAsistencia(alumnaId){
   const a = DB.alumnas.find(x=>x.id===alumnaId);
   const box = document.getElementById('scanResult');
   if(!a){ box.innerHTML = `<div class="scan-result">Carnet no reconocido.</div>`; return; }
+  const claseId = document.getElementById('claseAsistenciaSelect').value || null;
+  const clase = claseId ? DB.clases.find(c=>c.id===claseId) : null;
   const hoy=todayStr();
-  const yaHoy = DB.asistencias.find(r=>r.alumnaId===a.id && r.fecha===hoy);
-  if(!yaHoy){ DB.asistencias.push({alumnaId:a.id, fecha:hoy, hora:new Date().toLocaleTimeString('es-BO',{hour:'2-digit',minute:'2-digit'})}); save(); }
-  box.innerHTML = `<div class="scan-result ok"><strong>${a.nombre}</strong><br>Asistencia registrada ✓ — ${estadoLabel(a.vence)}</div>`;
+  const yaHoy = DB.asistencias.find(r=>r.alumnaId===a.id && r.fecha===hoy && (r.claseId||null)===claseId);
+  if(yaHoy){
+    box.innerHTML = `<div class="scan-result"><strong>${a.nombre}</strong><br>Ya estaba registrada${clase?` en ${clase.nombre}`:''} hoy.</div>`;
+    return;
+  }
+  DB.asistencias.push({alumnaId:a.id, fecha:hoy, claseId, claseNombre:clase?clase.nombre:null, hora:new Date().toLocaleTimeString('es-BO',{hour:'2-digit',minute:'2-digit'})});
+  save();
+  box.innerHTML = `<div class="scan-result ok"><strong>${a.nombre}</strong><br>Asistencia registrada${clase?` en ${clase.nombre}`:''} ✓ — ${estadoLabel(a.vence)}</div>`;
   render();
 }
 
@@ -652,8 +841,23 @@ function render(){
   const regsHoy = DB.asistencias.filter(r=>r.fecha===hoy).sort((a,b)=>b.hora.localeCompare(a.hora));
   ah.innerHTML = regsHoy.length ? regsHoy.map(r=>{
     const a = DB.alumnas.find(x=>x.id===r.alumnaId);
-    return `<div class="row-item"><div class="who"><div class="nm">${a?a.nombre:'—'}</div><div class="sub">${r.hora}</div></div></div>`;
+    return `<div class="row-item"><div class="who"><div class="nm">${a?a.nombre:'—'}</div><div class="sub">${r.hora}${r.claseNombre?' · '+r.claseNombre:''}</div></div></div>`;
   }).join('') : '<div class="empty">Aún no se registró asistencia hoy.</div>';
+
+  // desplegable de clase (para asociar la asistencia a una clase del día)
+  const claseSel = document.getElementById('claseAsistenciaSelect');
+  const prevClase = claseSel.value;
+  const diaHoyAsis = new Date().getDay();
+  const clasesHoyAsis = DB.clases.filter(c=>+c.dia===diaHoyAsis).sort((a,b)=>a.inicio.localeCompare(b.inicio));
+  claseSel.innerHTML = '<option value="">Sin clase específica</option>' +
+    clasesHoyAsis.map(c=>`<option value="${c.id}">${c.nombre} (${c.inicio}–${c.fin})</option>`).join('');
+  if(prevClase && clasesHoyAsis.some(c=>c.id===prevClase)){
+    claseSel.value = prevClase;
+  } else {
+    const ahora = new Date().toTimeString().slice(0,5);
+    const enCurso = clasesHoyAsis.find(c=>ahora>=c.inicio && ahora<=c.fin);
+    if(enCurso) claseSel.value = enCurso.id;
+  }
 
   // desplegable manual de asistencia
   const sel = document.getElementById('manualAlumnaSelect');
@@ -662,6 +866,60 @@ function render(){
     [...DB.alumnas].sort((a,b)=>a.nombre.localeCompare(b.nombre)).map(a=>`<option value="${a.id}">${a.nombre}</option>`).join('');
   sel.value = prevVal;
 }
+
+/* ---------- Acceso: administración vs vista pública ---------- */
+document.getElementById('gateLogo').src = document.querySelector('.logo-img').src;
+
+function renderGateSchedule(){
+  const cont = document.getElementById('gateSchedule');
+  if(!DB.clases.length){ cont.innerHTML = '<div class="empty">Todavía no hay clases cargadas.</div>'; return; }
+  cont.innerHTML = DIAS.map((dia,i)=>{
+    const clasesDia = DB.clases.filter(c=>+c.dia===i).sort((a,b)=>a.inicio.localeCompare(b.inicio));
+    if(!clasesDia.length) return '';
+    return `<div class="gate-day"><div class="gate-day-title">${dia}</div>` +
+      clasesDia.map(c=>`<div class="row-item"><div class="class-time">${c.inicio}</div><div class="who"><div class="nm">${c.nombre}</div><div class="sub">${c.inicio}–${c.fin}</div></div></div>`).join('') +
+      `</div>`;
+  }).join('') || '<div class="empty">Todavía no hay clases cargadas.</div>';
+}
+
+function mostrarApp(){
+  document.getElementById('gate').style.display='none';
+  document.getElementById('app').style.display='block';
+}
+function mostrarGate(){
+  document.getElementById('app').style.display='none';
+  document.getElementById('gate').style.display='flex';
+  document.getElementById('gatePinInput').value='';
+}
+function intentarEntrarAdmin(){
+  const pin = document.getElementById('gatePinInput').value.trim();
+  const pinCorrecto = (DB.config && DB.config.adminPin) || '1234';
+  if(pin === pinCorrecto){
+    localStorage.setItem('spf_admin_unlocked','1');
+    document.getElementById('gateError').style.display='none';
+    mostrarApp();
+  } else {
+    document.getElementById('gateError').style.display='block';
+  }
+}
+function cerrarSesionAdmin(){
+  if(!confirm('¿Cerrar la sesión de administración en este celular?')) return;
+  localStorage.removeItem('spf_admin_unlocked');
+  mostrarGate();
+}
+function cambiarPin(){
+  const actual = prompt('PIN actual:');
+  const pinCorrecto = (DB.config && DB.config.adminPin) || '1234';
+  if(actual !== pinCorrecto){ alert('PIN actual incorrecto.'); return; }
+  const nuevo = prompt('Nuevo PIN (solo números):');
+  if(!nuevo) return;
+  DB.config = DB.config || {};
+  DB.config.adminPin = nuevo.trim();
+  save();
+  alert('PIN actualizado.');
+}
+
+if(localStorage.getItem('spf_admin_unlocked')==='1'){ mostrarApp(); }
 </script>
 </body>
 </html>
