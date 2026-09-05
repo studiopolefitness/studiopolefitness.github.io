@@ -388,6 +388,17 @@
       <button class="ghost" id="btnEliminarClase" style="display:none" onclick="eliminarClase()">Eliminar</button>
       <button class="primary" onclick="guardarClase()">Guardar</button>
     </div>
+    <button class="ghost" id="btnVerAsistenciaClase" style="display:none;width:100%;margin-top:8px;" onclick="verAsistenciaClase()">Ver historial de asistencia</button>
+  </div>
+</div>
+
+<!-- MODAL: asistencia por clase -->
+<div class="modal-bg" id="modalAsistenciaClase">
+  <div class="modal" style="position:relative;">
+    <button class="close-x" onclick="closeModal('modalAsistenciaClase')">✕</button>
+    <h3 id="asistClaseTitulo">Asistencia</h3>
+    <div class="gate-sub" id="asistClaseTotal" style="margin-bottom:14px;"></div>
+    <div class="row-list" id="asistClaseList"></div>
   </div>
 </div>
 
@@ -619,6 +630,7 @@ function openClaseModal(c){
   document.getElementById('claseInicio').value = c ? c.inicio : '';
   document.getElementById('claseFin').value = c ? c.fin : '';
   document.getElementById('btnEliminarClase').style.display = c ? 'block':'none';
+  document.getElementById('btnVerAsistenciaClase').style.display = c ? 'block':'none';
   document.getElementById('modalClase').classList.add('active');
 }
 function guardarClase(){
@@ -637,6 +649,26 @@ function eliminarClase(){
   if(!confirm('¿Eliminar esta clase?')) return;
   DB.clases = DB.clases.filter(c=>c.id!==id);
   save(); closeModal('modalClase'); renderCalendario(); render();
+}
+function verAsistenciaClase(){
+  const id = document.getElementById('claseId').value;
+  const clase = DB.clases.find(c=>c.id===id); if(!clase) return;
+  const registros = DB.asistencias.filter(r=>r.claseId===id).sort((a,b)=>b.fecha.localeCompare(a.fecha) || b.hora.localeCompare(a.hora));
+  document.getElementById('asistClaseTitulo').textContent = `Asistencia · ${clase.nombre}`;
+  document.getElementById('asistClaseTotal').textContent = `${registros.length} asistencia${registros.length===1?'':'s'} registrada${registros.length===1?'':'s'} en total`;
+  const cont = document.getElementById('asistClaseList');
+  if(!registros.length){ cont.innerHTML = '<div class="empty">Todavía no hay asistencia registrada en esta clase.</div>'; }
+  else {
+    let ultimaFecha = null, html='';
+    registros.forEach(r=>{
+      if(r.fecha!==ultimaFecha){ html += `<div style="font-size:13px;font-weight:600;color:var(--accent);margin:14px 0 6px;">${fmtFecha(r.fecha)}</div>`; ultimaFecha=r.fecha; }
+      const a = DB.alumnas.find(x=>x.id===r.alumnaId);
+      html += `<div class="row-item"><div class="who"><div class="nm">${a?a.nombre:'—'}</div><div class="sub">${r.hora}${r.registradoPor?' · '+r.registradoPor:''}</div></div></div>`;
+    });
+    cont.innerHTML = html;
+  }
+  closeModal('modalClase');
+  document.getElementById('modalAsistenciaClase').classList.add('active');
 }
 
 /* ---------- Cobros ---------- */
