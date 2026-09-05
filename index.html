@@ -241,6 +241,25 @@
         <div class="section-title">Movimientos del período</div>
         <div class="row-list" id="repMovimientos"></div>
       </div>
+
+      <div id="cobrosProfesoras" style="display:none;">
+        <div class="field"><label>Profesora</label>
+          <select id="profReporteSelect"></select>
+        </div>
+        <div style="display:flex;gap:8px;margin-bottom:14px;">
+          <div class="field" style="margin-bottom:0;"><label>Desde</label><input id="profRepDesde" type="date"></div>
+          <div class="field" style="margin-bottom:0;"><label>Hasta</label><input id="profRepHasta" type="date"></div>
+        </div>
+        <button class="ghost" style="width:100%;margin-bottom:14px;" onclick="renderReporteProfesora()">Aplicar</button>
+
+        <div class="stat-row">
+          <div class="stat"><div class="num" id="profRepSesiones">0</div><div class="label">clases dictadas</div></div>
+          <div class="stat"><div class="num" id="profRepAsistencias">0</div><div class="label">asistencias tomadas</div></div>
+        </div>
+
+        <div class="section-title">Detalle por sesión</div>
+        <div class="row-list" id="profRepList"></div>
+      </div>
     </section>
 
   </main>
@@ -699,15 +718,17 @@ function renderAlumnas(){
 let cobrosModo='membresias';
 function renderCobrosModeChips(){
   const chips=document.getElementById('cobrosModeChips'); chips.innerHTML='';
-  [['membresias','Membresías'],['reportes','Reportes']].forEach(([key,label])=>{
+  [['membresias','Membresías'],['reportes','Ingresos/Egresos'],['profesoras','Clases por profesora']].forEach(([key,label])=>{
     const b=document.createElement('button'); b.textContent=label;
     if(cobrosModo===key) b.classList.add('active');
     b.onclick=()=>{
       cobrosModo=key;
       document.getElementById('cobrosMembresias').style.display = key==='membresias' ? 'block':'none';
       document.getElementById('cobrosReportes').style.display = key==='reportes' ? 'block':'none';
+      document.getElementById('cobrosProfesoras').style.display = key==='profesoras' ? 'block':'none';
       renderCobrosModeChips();
       if(key==='reportes') renderReportes();
+      if(key==='profesoras') renderReporteProfesora();
     };
     chips.appendChild(b);
   });
@@ -821,6 +842,45 @@ function exportarExcel(){
     {Concepto:'Resultado neto', Monto: totalIng-totalEgr}
   ]), 'Resumen');
   XLSX.writeFile(wb, `PoleFitness_${desde}_a_${hasta}.xlsx`);
+}
+
+/* ---------- Reporte: clases dictadas por profesora ---------- */
+function renderReporteProfesora(){
+  const sel = document.getElementById('profReporteSelect');
+  const prevSel = sel.value;
+  sel.innerHTML = getAdmins().map(a=>`<option value="${a.nombre}">${a.nombre}</option>`).join('');
+  if(prevSel && getAdmins().some(a=>a.nombre===prevSel)) sel.value = prevSel;
+
+  const desdeEl = document.getElementById('profRepDesde');
+  const hastaEl = document.getElementById('profRepHasta');
+  if(!desdeEl.value || !hastaEl.value){
+    const hoy = todayStr();
+    desdeEl.value = desdeEl.value || hoy.slice(0,8)+'01';
+    hastaEl.value = hastaEl.value || hoy;
+  }
+  const desde = desdeEl.value, hasta = hastaEl.value;
+  const profesora = sel.value;
+
+  const registros = DB.asistencias.filter(r=>r.registradoPor===profesora && r.fecha>=desde && r.fecha<=hasta);
+
+  // agrupar por sesión: misma fecha + misma clase = una clase dictada
+  const sesiones = {};
+  registros.forEach(r=>{
+    const key = r.fecha + '|' + (r.claseId||'sin-clase');
+    if(!sesiones[key]) sesiones[key] = { fecha:r.fecha, claseNombre: r.claseNombre||'Sin clase específica', alumnas:[] };
+    sesiones[key].alumnas.push(r.alumnaId);
+  });
+  const listaSesiones = Object.values(sesiones).sort((a,b)=>b.fecha.localeCompare(a.fecha));
+
+  document.getElementById('profRepSesiones').textContent = listaSesiones.length;
+  document.getElementById('profRepAsistencias').textContent = registros.length;
+
+  const cont = document.getElementById('profRepList');
+  cont.innerHTML = listaSesiones.length ? listaSesiones.map(s=>`
+    <div class="row-item">
+      <div class="who"><div class="nm">${s.claseNombre}</div><div class="sub">${fmtFecha(s.fecha)}</div></div>
+      <span class="badge ok">${s.alumnas.length} alumna${s.alumnas.length===1?'':'s'}</span>
+    </div>`).join('') : '<div class="empty">No hay clases registradas por esta profesora en el período.</div>';
 }
 
 /* ---------- Asistencia / escáner ---------- */
