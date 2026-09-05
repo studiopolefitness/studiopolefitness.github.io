@@ -154,7 +154,8 @@
     <div style="margin-top:8px;font-size:11px;color:var(--muted);" id="adminNameRow"></div>
     <div style="margin-top:4px;font-size:11px;color:var(--muted);">
       <button class="edit-name" onclick="abrirProfesoresModal()">gestionar profesores</button> ·
-      <button class="edit-name" onclick="cerrarSesionAdmin()">cerrar sesión</button>
+      <button class="edit-name" onclick="cerrarSesionAdmin()">cerrar sesión</button> ·
+      <button class="edit-name" onclick="recuperarDatosAntiguos()">recuperar datos antiguos</button>
     </div>
   </header>
 
@@ -975,6 +976,30 @@ function eliminarProfesor(id){
   DB.config.admins = admins.filter(a=>a.id!==id);
   save();
   renderListaProfesores();
+}
+
+/* ---------- Recuperar datos de la versión anterior (localStorage, antes de Firebase) ---------- */
+function recuperarDatosAntiguos(){
+  const raw = localStorage.getItem('danzapp_data_v1');
+  if(!raw){ alert('No se encontraron datos antiguos guardados en este navegador.'); return; }
+  let old;
+  try{ old = JSON.parse(raw); } catch(e){ alert('No se pudo leer el respaldo antiguo.'); return; }
+
+  let clasesAgregadas = 0, alumnasAgregadas = 0;
+  (old.clases||[]).forEach(c=>{
+    if(!DB.clases.some(x=>x.id===c.id)){ DB.clases.push(c); clasesAgregadas++; }
+  });
+  (old.alumnas||[]).forEach(a=>{
+    if(!DB.alumnas.some(x=>x.id===a.id)){ DB.alumnas.push(a); alumnasAgregadas++; }
+  });
+
+  if(clasesAgregadas===0 && alumnasAgregadas===0){
+    alert('No había datos nuevos para recuperar (ya estaban todos guardados, o el respaldo estaba vacío).');
+    return;
+  }
+  save();
+  render(); renderCalendario(); renderGateSchedule();
+  alert(`Se recuperaron ${clasesAgregadas} clase(s) y ${alumnasAgregadas} alumna(s) que faltaban.`);
 }
 
 if(localStorage.getItem('spf_admin_unlocked')==='1'){ mostrarApp(); }
